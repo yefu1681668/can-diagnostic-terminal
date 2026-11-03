@@ -1,0 +1,35 @@
+# ===== Keil MDK 编译产物 =====
+*.axf
+*.hex
+*.htm
+*.lnp
+*.lst
+*.map
+*.dep
+*.iex
+*.crf
+*.o
+*.d
+*.bak
+*.log
+JLinkLog.txt
+JLinkSettings.ini
+
+# Keil 输出目录
+app/MDK-ARM/app/
+
+# Keil 用户界面状态文件（每台电脑不一样，不该进仓库）
+*.uvguix.*
+*_Backup/
+
+# Keil RTE 缓存
+RTE/
+
+
+# ===== Python =====
+__pycache__/
+*.pyc
+
+# ===== 系统杂项 =====
+Thumbs.db
+Desktop.ini

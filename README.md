@@ -80,10 +80,9 @@ DEMO 模式下每条 UDS 命令都会在板内走一遍真实的 CAN 收发 + IS
 - [x] CAN 500kbps 位时序（APB1 36MHz ÷ 4 ÷ 18TQ，采样点 88.9%）
 - [x] 上电自检 T1（6B 单帧回环）/ T2（20B × 25 帧拆包重组）PASS
 - [x] ISO-TP 多帧：0x19 响应 8 字节自动走 FF + CF 拆包
-- [x] UDS 0x19 ReadDTCInformation：正响应 `59 02 09 01 C1 00 87 09` → 1 个 DTC `C10087 status=09 (active)`
+- [x] UDS 六服务全闭环：0x10 会话（`50 03 00 19 01 F4`）/ 0x14 清码（`54`）/ 0x19 读 DTC（`59 02 09 01 C1 00 87 09`）/ 0x22 读 DID（`62 F4 0C 0C DD` → rpm 3293）/ 0x27 安全访问（`67 01 12 A2` → key `0x48F8` → `67 02`）/ 0x2E 写 DID（`6E FD 00`）
 - [x] 故障注入 → 0x310 标志位 → DTC 读出 → 黑匣子落盘，全链路闭环（`uds req=1 resp=1 nrc=0`）
-- [x] W25Q16 黑匣子：JEDEC ID 识别（0xEF4014）、格式化、追加写入、dump 还原、时间戳递增
-- [ ] UDS 其余服务（0x10 / 0x14 / 0x22 / 0x27 / 0x2E）单板命令逐项验证中
+- [x] W25Q16 黑匣子：JEDEC ID（0xEF4014）、格式化、追加、dump 还原、时间戳递增、六类事件（POWER_ON / FAULT_SET / SESSION / UNLOCKED / PARAM_WRITE / DTC_CLEAR）全部落盘正确
 - [ ] 黑匣子掉电恢复（拔电重上电日志不丢）待测
 - [ ] 双板 NORMAL 模式真机互通（待第二块 C8T6 + 可靠收发器）
 
@@ -112,6 +111,36 @@ cmd> bb
   #001 FAULT_SET t= 40104ms arg=0x0100
 cmd> canstats
 [STATS] can tx=1430 rx=1404 ring=0 | uds req=1 resp=1 nrc=0
+
+cmd> session 3
+  <- UDS resp (6B): 50 03 00 19 01 F4
+cmd> seedkey
+[UDS] -> 0x27 sub=01 request seed
+  <- UDS resp (4B): 67 01 12 A2
+  = seed=0x12A2, key=seed^5A5A=0x48F8, sending...
+  <- UDS resp (2B): 67 02
+cmd> read F40C
+[UDS] -> 0x22 DID=0xF40C
+  <- UDS resp (5B): 62 F4 0C 0C DD
+  = engine rpm = 3293
+cmd> write 50
+[UDS] -> 0x2E DID=FD00 val=50
+  <- UDS resp (3B): 6E FD 00
+cmd> cleardtc
+[UDS] -> 0x14 clear all
+  <- UDS resp (1B): 54
+cmd> dtc
+[UDS] -> 0x19 sub=02 read DTC list
+  <- UDS resp (4B): 59 02 09 00
+  = 0 DTC(s):
+cmd> bb
+[BB] total logged=6, showing last 6:
+  #000 POWER_ON    t= 19566ms arg=0x0000
+  #001 FAULT_SET   t= 40104ms arg=0x0100
+  #002 SESSION     t=269159ms arg=0x0300
+  #003 UNLOCKED    t=277367ms arg=0x0000
+  #004 PARAM_WRITE t=293006ms arg=0x0032
+  #005 DTC_CLEAR   t=299726ms arg=0xFF00
 ```
 
 ## 调试记录（真机踩过的坑）

@@ -83,7 +83,7 @@ DEMO 模式下每条 UDS 命令都会在板内走一遍真实的 CAN 收发 + IS
 - [x] UDS 六服务全闭环：0x10 会话（`50 03 00 19 01 F4`）/ 0x14 清码（`54`）/ 0x19 读 DTC（`59 02 09 01 C1 00 87 09`）/ 0x22 读 DID（`62 F4 0C 0C DD` → rpm 3293）/ 0x27 安全访问（`67 01 12 A2` → key `0x48F8` → `67 02`）/ 0x2E 写 DID（`6E FD 00`）
 - [x] 故障注入 → 0x310 标志位 → DTC 读出 → 黑匣子落盘，全链路闭环（`uds req=1 resp=1 nrc=0`）
 - [x] W25Q16 黑匣子：JEDEC ID（0xEF4014）、格式化、追加、dump 还原、时间戳递增、六类事件（POWER_ON / FAULT_SET / SESSION / UNLOCKED / PARAM_WRITE / DTC_CLEAR）全部落盘正确
-- [ ] 黑匣子掉电恢复（拔电重上电日志不丢）待测
+- [x] 黑匣子掉电恢复：拔 USB 真断电后重新上电，断电前 6 条记录原样保留，追加第 7 条 POWER_ON（`total logged=7`）
 - [ ] 双板 NORMAL 模式真机互通（待第二块 C8T6 + 可靠收发器）
 
 ## 真机实测记录
@@ -141,6 +141,19 @@ cmd> bb
   #003 UNLOCKED    t=277367ms arg=0x0000
   #004 PARAM_WRITE t=293006ms arg=0x0032
   #005 DTC_CLEAR   t=299726ms arg=0xFF00
+```
+
+**断电恢复测试**（拔 USB 真断电 → 重新上电 → `bb`）：
+
+```
+[BB] total logged=7, showing last 7:
+  #000 POWER_ON    t= 19566ms arg=0x0000
+  #001 FAULT_SET   t= 40104ms arg=0x0100
+  #002 SESSION     t=269159ms arg=0x0300
+  #003 UNLOCKED    t=277367ms arg=0x0000
+  #004 PARAM_WRITE t=293006ms arg=0x0032
+  #005 DTC_CLEAR   t=299726ms arg=0xFF00
+  #006 POWER_ON    t=   109ms arg=0x0000   ← 重新上电后追加，前 6 条原样保留
 ```
 
 ## 调试记录（真机踩过的坑）

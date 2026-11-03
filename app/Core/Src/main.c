@@ -114,6 +114,7 @@ int main(void)
 
   /* ---------- 外部 Flash：黑匣子的存储介质 ---------- */
   printf("\r\n=== STM32 CAN Diagnostic Terminal (role=%s) ===\r\n", NODE_ROLE_NAME);
+  W25Q_Init();                                      /* 先建 CS 空闲 + 等器件闲 */
   printf("[W25Q] JEDEC ID = 0x%06lX\r\n", (unsigned long)W25Q_ReadID());
   blackbox_mount();                                 /* 挂载事件日志（首次会格式化） */
 
@@ -215,21 +216,31 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief GPIO Init: PC13 输出（LED）
+  * @brief GPIO Init: PC13 输出（LED）+ PA4 输出（W25Q64 片选）
   */
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
+  /* 时钟：GPIOC 给 LED，GPIOA 给 W25Q 片选（漏了 GPIOA 片选就永远拉不低 → ID 读 0） */
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
 
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);   /* 高=灭 */
-
+  /* PC13 LED：初始高=灭 */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
   GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /* PA4 W25Q64_CS：推挽输出，初始高（空闲释放，W25Q 在 CS 下降沿锁存命令） */
+  HAL_GPIO_WritePin(W25Q64_CS_GPIO_Port, W25Q64_CS_Pin, GPIO_PIN_SET);
+  GPIO_InitStruct.Pin = W25Q64_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(W25Q64_CS_GPIO_Port, &GPIO_InitStruct);
 }
 
 /**

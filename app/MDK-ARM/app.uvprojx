@@ -395,7 +395,7 @@
               <FileType>1</FileType>
               <FilePath>../Core/Src/main.c</FilePath>
             </File>
-              <File>
+            <File>
               <FileName>w25qxx.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/w25qxx.c</FilePath>

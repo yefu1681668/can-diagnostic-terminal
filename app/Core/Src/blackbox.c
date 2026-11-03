@@ -27,16 +27,39 @@
 #define BB_REC_SIZE     16U
 #define BB_POOL_CAP     (BB_POOL_SECTORS * (W25Q_SECTOR_SIZE / BB_REC_SIZE))  /* 768 */
 
-typedef struct
-{
-    uint8_t  type;
-    uint32_t ts;
-    uint16_t arg;
-    uint8_t  rsv[10];
-} bb_rec_t;
+/* 记录必须按 16B 紧凑字节布局【手工序列化】写入。
+ * 绝对不要用 struct 直写 —— uint32_t 成员会引入 3 字节对齐填充，
+ * 与 dump 的紧凑解析错位，时间戳/参数会变成乱码（真机踩过）。 */
 
 static uint32_t s_count;            /* 累计记录数（含已被覆盖的） */
 static uint8_t  s_mounted;
+
+/**
+  * @brief  格式化黑匣子：清元数据扇区 + 整个记录池，计数归零
+  */
+void blackbox_format(void)
+{
+    uint8_t  init[8];
+    uint32_t i;
+
+    init[0] = (uint8_t)(BB_MAGIC >> 24);
+    init[1] = (uint8_t)(BB_MAGIC >> 16);
+    init[2] = (uint8_t)(BB_MAGIC >> 8);
+    init[3] = (uint8_t)BB_MAGIC;
+    init[4] = init[5] = init[6] = init[7] = 0U;
+
+    W25Q_WriteEnable();
+    W25Q_SectorErase(BB_META_ADDR);
+    W25Q_PageProgram(BB_META_ADDR, init, 8);
+
+    for (i = 0U; i < BB_POOL_SECTORS; i++)
+    {
+        W25Q_WriteEnable();
+        W25Q_SectorErase(BB_POOL_ADDR + i * W25Q_SECTOR_SIZE);
+    }
+
+    s_count = 0U;
+}
 
 /**
   * @brief  上电挂载：读元数据恢复计数；magic 不对（首次上电）则格式化
@@ -56,28 +79,7 @@ uint8_t blackbox_mount(void)
 
         if (magic != BB_MAGIC)
         {
-            /* 首次上电：格式化元数据扇区 */
-            uint8_t init[8];
-            init[0] = (uint8_t)(BB_MAGIC >> 24);
-            init[1] = (uint8_t)(BB_MAGIC >> 16);
-            init[2] = (uint8_t)(BB_MAGIC >> 8);
-            init[3] = (uint8_t)BB_MAGIC;
-            init[4] = init[5] = init[6] = init[7] = 0U;
-
-            W25Q_WriteEnable();
-            W25Q_SectorErase(BB_META_ADDR);
-            W25Q_PageProgram(BB_META_ADDR, init, 8);
-
-            /* 记录池也擦干净 */
-            {
-                uint32_t i;
-                for (i = 0U; i < BB_POOL_SECTORS; i++)
-                {
-                    W25Q_WriteEnable();
-                    W25Q_SectorErase(BB_POOL_ADDR + i * W25Q_SECTOR_SIZE);
-                }
-            }
-            s_count = 0U;
+            blackbox_format();      /* 首次上电 / 版本不符：整块格式化 */
         }
     }
     s_mounted = 1U;
@@ -90,16 +92,26 @@ uint8_t blackbox_mount(void)
   */
 void blackbox_log(uint8_t type, uint8_t arg_a, uint8_t arg_b)
 {
-    bb_rec_t rec;
+    uint8_t  raw[BB_REC_SIZE];
+    uint32_t ts;
+    uint16_t arg;
     uint32_t slot;
     uint32_t addr;
 
     if (!s_mounted) return;
 
-    memset(&rec, 0, sizeof(rec));
-    rec.type = type;
-    rec.ts   = HAL_GetTick();
-    rec.arg  = (uint16_t)(((uint16_t)arg_a << 8) | arg_b);
+    ts  = HAL_GetTick();
+    arg = (uint16_t)(((uint16_t)arg_a << 8) | arg_b);
+
+    /* 手工填 16B：type(1) + ts(4,小端) + arg(2,高字节在前) + 保留(9) */
+    memset(raw, 0, sizeof(raw));
+    raw[0] = type;
+    raw[1] = (uint8_t)(ts);
+    raw[2] = (uint8_t)(ts >> 8);
+    raw[3] = (uint8_t)(ts >> 16);
+    raw[4] = (uint8_t)(ts >> 24);
+    raw[5] = (uint8_t)(arg >> 8);
+    raw[6] = (uint8_t)(arg);
 
     slot = s_count % BB_POOL_CAP;
     addr = BB_POOL_ADDR + slot * BB_REC_SIZE;
@@ -113,7 +125,7 @@ void blackbox_log(uint8_t type, uint8_t arg_a, uint8_t arg_b)
 
     /* W25Q 页写一次最多 256B 且不能跨页；16B 记录对齐好了不会跨 */
     W25Q_WriteEnable();
-    W25Q_PageProgram(addr, (const uint8_t *)&rec, BB_REC_SIZE);
+    W25Q_PageProgram(addr, raw, BB_REC_SIZE);
 
     s_count++;
 

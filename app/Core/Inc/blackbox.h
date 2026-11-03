@@ -22,6 +22,7 @@
 #define BB_EVT_POWER_ON     0x06U   /* 上电 */
 
 uint8_t  blackbox_mount(void);                  /* 上电挂载：扫描恢复写指针 */
+void     blackbox_format(void);                 /* 清空全部日志（CLI: bbclear） */
 void     blackbox_log(uint8_t type, uint8_t arg_a, uint8_t arg_b);
 void     blackbox_dump(void);                   /* 打印全部记录（CLI 用） */
 uint32_t blackbox_count(void);

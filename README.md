@@ -75,13 +75,61 @@ DEMO 模式下每条 UDS 命令都会在板内走一遍真实的 CAN 收发 + IS
 └── LICENSE
 ```
 
-## 已验证
+## 已验证（真机 DEMO 自环模式，2026-11-03）
 
 - [x] CAN 500kbps 位时序（APB1 36MHz ÷ 4 ÷ 18TQ，采样点 88.9%）
-- [x] ISO-TP 多帧拆包重组（0x19 列表响应 > 8B 自动走 FF+CF）
-- [x] UDS 全服务闭环（含 NRC 否定路径、安全访问拒绝路径）
-- [x] 黑匣子掉电恢复（拔电重上电日志不丢）
+- [x] 上电自检 T1（6B 单帧回环）/ T2（20B × 25 帧拆包重组）PASS
+- [x] ISO-TP 多帧：0x19 响应 8 字节自动走 FF + CF 拆包
+- [x] UDS 0x19 ReadDTCInformation：正响应 `59 02 09 01 C1 00 87 09` → 1 个 DTC `C10087 status=09 (active)`
+- [x] 故障注入 → 0x310 标志位 → DTC 读出 → 黑匣子落盘，全链路闭环（`uds req=1 resp=1 nrc=0`）
+- [x] W25Q16 黑匣子：JEDEC ID 识别（0xEF4014）、格式化、追加写入、dump 还原、时间戳递增
+- [ ] UDS 其余服务（0x10 / 0x14 / 0x22 / 0x27 / 0x2E）单板命令逐项验证中
+- [ ] 黑匣子掉电恢复（拔电重上电日志不丢）待测
 - [ ] 双板 NORMAL 模式真机互通（待第二块 C8T6 + 可靠收发器）
+
+## 真机实测记录
+
+DEMO 模式（一块 C8T6，CAN 内部回环，无需外部收发器）串口 115200 实测：
+
+```
+=== STM32 CAN Diagnostic Terminal (role=DEMO) ===
+[W25Q] JEDEC ID = 0xEF4014
+[CAN] init 500kbps (LOOPBACK) ... OK
+[CAN] T1 pass: 6B frame loopback OK
+[CAN] T2 pass: 20B / 25 frames reassembled OK
+[CAN] self-test PASS
+
+cmd> fault 1
+[FAULT] injected #1: battery voltage high
+cmd> dtc
+[UDS] -> 0x19 sub=02 read DTC list
+  <- UDS resp (8B): 59 02 09 01 C1 00 87 09
+  = 1 DTC(s):
+   DTC C10087 status=09 (active)
+cmd> bb
+[BB] total logged=2, showing last 2:
+  #000 POWER_ON  t= 19566ms arg=0x0000
+  #001 FAULT_SET t= 40104ms arg=0x0100
+cmd> canstats
+[STATS] can tx=1430 rx=1404 ring=0 | uds req=1 resp=1 nrc=0
+```
+
+## 调试记录（真机踩过的坑）
+
+1. **W25Q 读 ID 全 0（`JEDEC = 0x000000`）**
+   现象：SPI 时序、驱动代码与之前 Bootloader 工程完全一致，却读不到 ID。
+   根因：`MX_GPIO_Init()` 只初始化了 PC13(LED)，漏了 PA4(片选)——连 GPIOA 时钟都没开。
+   PA4 复位默认浮空输入，`HAL_GPIO_WritePin(GPIOA, PIN_4, RESET)` 写 ODR 无效，CS 永远拉不低。
+   修复：补 `__HAL_RCC_GPIOA_CLK_ENABLE()` + PA4 推挽输出初始高。
+   启示：**外设通信不通先查片选/时钟，别一头扎进协议层。**
+
+2. **黑匣子时间戳全是上亿的乱数**
+   现象：`t=3640655872ms` 这类值，且不递增。
+   根因：`blackbox_log()` 直接把结构体按内存字节写进 Flash，而结构体里 `uint32_t ts`
+   要求 4 字节对齐，`uint8_t type` 后面被编译器插入 3 字节 padding，
+   与 dump 端的 16B 紧凑解析错位。
+   修复：改为**手工按字节序列化**成 16B 定长记录（type / ts 小端 / arg），不依赖结构体布局。
+   启示：**Flash/EEPROM/网络包这类定长格式，永远显式序列化，别直接 memcpy 结构体。**
 
 ## 已知说明
 

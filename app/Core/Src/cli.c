@@ -55,6 +55,7 @@ static void cmd_help(void)
     printf("  dtc                   UDS 0x19 read DTC list\r\n");
     printf("  cleardtc              UDS 0x14 clear all DTC\r\n");
     printf("  bb                    blackbox dump (W25Q log)\r\n");
+    printf("  bbclear               erase blackbox log\r\n");
     printf("  canstats              CAN/UDS counters\r\n");
     printf("  echo on|off           command echo\r\n");
 }
@@ -182,6 +183,12 @@ static void cmd_exec(char *line)
         uds_client_clear_dtc();
     }
     else if (strcmp(cmd, "bb") == 0)        blackbox_dump();
+    else if (strcmp(cmd, "bbclear") == 0)
+    {
+        blackbox_format();
+        blackbox_log(BB_EVT_POWER_ON, 0U, 0U);   /* 清完留一条上电标记 */
+        printf("[BB] cleared\r\n");
+    }
     else if (strcmp(cmd, "canstats") == 0)
     {
         printf("[STATS] can tx=%lu rx=%lu ring=%lu | uds req=%lu resp=%lu nrc=%lu\r\n",

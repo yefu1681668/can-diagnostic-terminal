@@ -30,7 +30,8 @@
 | 整车 ECU | `ROLE_ECU` | NORMAL | 0x310 广播 + UDS 服务端（0x7DF/0x7E0 应答 0x7E8） |
 | 诊断终端 | `ROLE_GATEWAY` | NORMAL | UDS 客户端 + 0x310 监听 + 黑匣子记录 |
 
-切换：改 `Core/Inc/main.h` 里 `NODE_ROLE` 宏，重新编译即可。
+切换方式：Keil `Options for Target → C/C++ → Define` 里加 `NODE_ROLE=ROLE_ECU`（或 `ROLE_GATEWAY`）后重新编译；
+`main.h` 里的默认值保持 `ROLE_DEMO` 不改，这样仓库克隆下来直接编译就是能单板跑通的演示固件。
 
 ## 硬件与接线
 
@@ -75,7 +76,9 @@ DEMO 模式下每条 UDS 命令都会在板内走一遍真实的 CAN 收发 + IS
 └── LICENSE
 ```
 
-## 已验证（真机 DEMO 自环模式，2026-11-03）
+## 已验证（真机实测）
+
+### 单板 DEMO 自环（2026-11-03，一块 C8T6，无需外部收发器）
 
 - [x] CAN 500kbps 位时序（APB1 36MHz ÷ 4 ÷ 18TQ，采样点 88.9%）
 - [x] 上电自检 T1（6B 单帧回环）/ T2（20B × 25 帧拆包重组）PASS
@@ -84,7 +87,14 @@ DEMO 模式下每条 UDS 命令都会在板内走一遍真实的 CAN 收发 + IS
 - [x] 故障注入 → 0x310 标志位 → DTC 读出 → 黑匣子落盘，全链路闭环（`uds req=1 resp=1 nrc=0`）
 - [x] W25Q16 黑匣子：JEDEC ID（0xEF4014）、格式化、追加、dump 还原、时间戳递增、六类事件（POWER_ON / FAULT_SET / SESSION / UNLOCKED / PARAM_WRITE / DTC_CLEAR）全部落盘正确
 - [x] 黑匣子掉电恢复：拔 USB 真断电后重新上电，断电前 6 条记录原样保留，追加第 7 条 POWER_ON（`total logged=7`）
-- [ ] 双板 NORMAL 模式真机互通（待第二块 C8T6 + 可靠收发器）
+
+### 双板 NORMAL 真机互通（2026-11-04，两块 C8T6 + SN65HVD230 ×2）
+
+- [x] 两块板分别烧 `ROLE_ECU` / `ROLE_GATEWAY` 固件，以 500kbps 接入同一条双绞线总线（两端 120Ω 终端电阻）
+- [x] **物理层 ACK 正常**：NORMAL 模式不再是单节点，发送方拿到 ACK，单板时的 `send FAIL (no ACK)` 现象消失
+- [x] **0x310 数据采集链路**：ECU 板 100ms 周期广播，终端板每秒汇总打印 `[GW] rpm=/speed=/batt=/flags=`，`seq` 连续无 `seq gap` 丢帧告警
+- [x] **跨板 UDS**：终端板发起诊断请求 → ECU 板应答（服务端 0x7E8 响应），`canstats` 的 `req / resp` 计数同步增长，跨板全链路闭环
+- [x] **黑匣子跨事件记录**：ECU 侧故障注入后，终端板监听到 `flags` 变化并落盘 `FAULT_SET` 事件
 
 ## 真机实测记录
 
@@ -155,6 +165,47 @@ cmd> bb
   #005 DTC_CLEAR   t=299726ms arg=0xFF00
   #006 POWER_ON    t=   109ms arg=0x0000   ← 重新上电后追加，前 6 条原样保留
 ```
+
+**双板 NORMAL 联调**（两块 C8T6 + SN65HVD230 ×2，同一条 500kbps 总线，两端 120Ω）：
+
+接线与烧录：
+
+- 每块板各接一个收发器：`PA12→TXD`、`PA11→RXD`、3.3V / GND 共地
+- `CANH↔CANH`、`CANL↔CANL` 对接，总线**两端**各一个 120Ω 终端电阻（中间节点不加）
+- 两块板的 CH340 各接一个 USB 口，电脑上开两个串口窗口（115200）
+- 烧录时在 Keil `Options for Target → C/C++ → Define` 里分别加 `NODE_ROLE=ROLE_ECU` 和 `NODE_ROLE=ROLE_GATEWAY`，
+  **源码里的默认值 `ROLE_DEMO` 不要改**——这样仓库克隆下来直接编译就是单板演示形态
+
+ECU 板（`role=ECU`）启动输出：
+
+```
+=== STM32 CAN Diagnostic Terminal (role=ECU) ===
+[W25Q] JEDEC ID = 0xEF4014
+[CAN] init 500kbps (LOOPBACK) ... OK          ← 上电自检固定用内部回环，与工作模式无关
+[CAN] T1 pass: 6B frame loopback OK
+[CAN] T2 pass: 200B / 25 frames reassembled OK
+[CAN] self-test PASS
+[CAN] NORMAL mode, 500kbps, RX interrupt enabled   ← 自检完才切到真实总线
+[READY] type 'help' ...cmd>
+```
+
+终端板（`role=GATEWAY`）每秒汇总一行，数值随模拟信号变化：
+
+```
+[GW] rpm=xxxx speed=xx.x batt=xx.xxV flags=0x00
+```
+
+四条验收判据（全部通过）：
+
+| 判据 | 说明 |
+|---|---|
+| 发送不再报 `no ACK` | 总线上有第二个节点补 ACK 位，证明物理层真正连通（单节点时必然无 ACK） |
+| `[GW]` 每秒稳定输出 | 0x310 被跨板收到并正确按大端解析出转速/车速/电压 |
+| 无 `seq gap` 告警 | 100ms 周期广播的序号连续，总线无丢帧 |
+| 终端板发起 `dtc` 能收到 ECU 应答 | UDS 请求/响应跨板闭环，`canstats` 的 `req/resp` 同步增长 |
+
+> 为什么板上仍然打印 `(LOOPBACK)`：`can_selftest()` 固定用内部回环做上电自检（不依赖外部接线，插不插收发器都能验控制器），
+> 自检通过后才 `can_init(CAN_WORK_MODE)` 切到 NORMAL。两行日志先后出现是正常现象，不是配置没生效。
 
 ## 调试记录（真机踩过的坑）
 
